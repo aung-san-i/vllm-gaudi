@@ -57,8 +57,7 @@ ENV TORCH_TYPE=${TORCH_TYPE} \
 COPY LICENSE /licenses/
 
 # System setup - Remove FIPS provider and add EPEL
-RUN dnf update -y --skip-broken --nobest && \
-    dnf install -y --allowerasing python3-dnf-plugin-versionlock && \
+RUN dnf install -y --allowerasing python3-dnf-plugin-versionlock && \
     dnf versionlock add redhat-release* && \
     dnf -y update && \
     # '|| true' is added to support RHEL 9.4 in which openssl-fips-provider-so is not installed
@@ -183,7 +182,6 @@ ENV BASE_NAME=${BASE_NAME} \
 
 # Install additional system dependencies
 RUN dnf install -y gettext jq git --allowerasing && \
-    dnf update --skip-broken --nobest -y && \
     dnf clean all && \
     ln -sf /usr/bin/python3 /usr/bin/python
 
@@ -212,7 +210,10 @@ RUN set -e && \
     cd $VLLM_PATH2 && \
     git checkout ${VLLM_GAUDI_COMMIT} && \
     VLLM_TARGET_DEVICE=hpu pip install --no-cache-dir -v . --no-build-isolation && \
-    pip check
+    pip check && \
+    rm -rf $VLLM_PATH $VLLM_PATH2 && \
+    rm -rf /tmp/* /var/tmp/* && \
+    dnf clean all
 
 # The scripts below are used for benchmarks testing and autocalc:
 # RUN pip3 install -v -e $VLLM_PATH/tests/vllm_test_utils
