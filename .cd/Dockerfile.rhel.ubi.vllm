@@ -183,6 +183,7 @@ ENV BASE_NAME=${BASE_NAME} \
 
 # Install additional system dependencies
 RUN dnf install -y gettext jq git --allowerasing && \
+    dnf update --skip-broken --nobest -y && \
     dnf clean all && \
     ln -sf /usr/bin/python3 /usr/bin/python
 
