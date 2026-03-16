@@ -120,7 +120,6 @@ RUN printf "[habanalabs]\\nname=Habana RH9 Linux repo\\nbaseurl=https://${ARTIFA
     mkdir -p /etc/habanalabs && \
     echo "${DETECTED_SYNAPSE_REVISION}" > /etc/habanalabs/synapse_revision && \
     echo "Detected Synapse revision: ${DETECTED_SYNAPSE_REVISION}" && \
-    dnf clean all && \
     chmod +t /var/log/habana_logs && \
     rm -f /etc/yum.repos.d/habanalabs.repo
 
@@ -211,9 +210,19 @@ RUN set -e && \
     git checkout ${VLLM_GAUDI_COMMIT} && \
     VLLM_TARGET_DEVICE=hpu pip install --no-cache-dir -v . --no-build-isolation && \
     pip check && \
-    rm -rf $VLLM_PATH $VLLM_PATH2 && \
-    rm -rf /tmp/* /var/tmp/* && \
-    dnf clean all
+    rm -rf $VLLM_PATH $VLLM_PATH2
+
+RUN dnf update -y curl-minimal libcurl-minimal glib2 \
+    python3 python3-libs python3.12 python3.12-libs python3.12-devel \
+    python3-pip python3.12-pip \
+    openssl openssl-libs \
+    systemd systemd-libs systemd-pam \
+    libxml2 openldap p11-kit p11-kit-trust tar \
+    git git-core git-core-doc \
+    sqlite-libs && \
+    dnf remove -y gdb gdb-gdbserver gdb-headless && \
+    dnf clean all && \
+    rm -rf /tmp/* /var/tmp/*
 
 # The scripts below are used for benchmarks testing and autocalc:
 # RUN pip3 install -v -e $VLLM_PATH/tests/vllm_test_utils
