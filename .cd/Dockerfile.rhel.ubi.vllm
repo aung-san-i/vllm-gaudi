@@ -57,7 +57,7 @@ ENV TORCH_TYPE=${TORCH_TYPE} \
 COPY LICENSE /licenses/
 
 # System setup - Remove FIPS provider and add EPEL
-RUN dnf update --skip-broken --nobest && \
+RUN dnf update -y --skip-broken --nobest && \
     dnf install -y --allowerasing python3-dnf-plugin-versionlock && \
     dnf versionlock add redhat-release* && \
     dnf -y update && \
