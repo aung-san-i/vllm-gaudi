@@ -20,11 +20,15 @@ ARG HABANA_RPM_REPO_PATH="rhel/9/${OS_VERSION}"
 ARG TORCH_TYPE=upstream
 ARG VLLM_GAUDI_COMMIT=v0.16.0
 ARG VLLM_PROJECT_COMMIT=v0.16.0
+# ubi9:9.6
+ARG BASE_IMAGE="registry.access.redhat.com/ubi9/ubi@sha256:dec374e05cc13ebbc0975c9f521f3db6942d27f8ccdf06b180160490eef8bdbc"
+# SHA-256 checksum of the Habana GPG public key (verified before rpm --import)
+ARG HABANA_GPG_CHECKSUM="e576f16d3e80a2894d0c4638753425a6d9f9060b45ade221d09e9911fefcf2d9"
 
 # ============================================================================
 # Stage 1: gaudi-base - Base system setup with Habana drivers
 # ============================================================================
-FROM registry.access.redhat.com/ubi9/ubi:${OS_VERSION} AS gaudi-base
+FROM ${BASE_IMAGE} AS gaudi-base
 
 # Re-declare global ARGs to use them in this stage
 ARG ARTIFACTORY_URL
@@ -36,6 +40,7 @@ ARG PT_VERSION
 ARG PYPI_INDEX_URL
 ARG HABANA_RPM_REPO_PATH
 ARG TORCH_TYPE
+ARG HABANA_GPG_CHECKSUM="e576f16d3e80a2894d0c4638753425a6d9f9060b45ade221d09e9911fefcf2d9"
 
 # Labels for RHEL certification.
 # Note: when SYNAPSE_REVISION=latest, this metadata intentionally records "latest"
@@ -90,16 +95,19 @@ RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && \
     ln -s /usr/bin/python3 /usr/bin/python
 
 # Install base Python packages
-RUN pip install --no-cache-dir setuptools==79.0.1 wheel setuptools_scm && \
-    pip install --no-cache-dir --upgrade Jinja2 protobuf urllib3 requests
+RUN python3 -m pip install --no-cache-dir setuptools>=80.0.0 wheel>=0.46.2 jaraco.context>=6.1.0 \
+    xgrammar>=0.1.32 ray>=2.55.0 setuptools_scm && \
+    python3 -m pip install --no-cache-dir --upgrade Jinja2 protobuf urllib3 requests
 
 # Setup Habana repository and install Habana packages
-RUN printf "[habanalabs]\\nname=Habana RH9 Linux repo\\nbaseurl=https://${ARTIFACTORY_URL}/artifactory/${HABANA_RPM_REPO_PATH}\\ngpgkey=https://${ARTIFACTORY_URL}/artifactory/${HABANA_RPM_REPO_PATH}/repodata/repomd.xml.key\\ngpgcheck=1\\n" > /etc/yum.repos.d/habanalabs.repo && \
+RUN --mount=type=tmpfs,target=/tmp \
+    printf "[habanalabs]\\nname=Habana RH9 Linux repo\\nbaseurl=https://${ARTIFACTORY_URL}/artifactory/${HABANA_RPM_REPO_PATH}\\ngpgkey=https://${ARTIFACTORY_URL}/artifactory/${HABANA_RPM_REPO_PATH}/repodata/repomd.xml.key\\ngpgcheck=1\\n" > /etc/yum.repos.d/habanalabs.repo && \
     echo "=== Content of habanalabs.repo ===" && \
     cat /etc/yum.repos.d/habanalabs.repo && \
     echo "=== End of habanalabs.repo ===" && \
     _GPG_TEMP=$(mktemp -d) && \
     wget -q -O "${_GPG_TEMP}/habana_pubkey" "https://${ARTIFACTORY_URL}/artifactory/gaudi-general/keyPairs/primary/public" && \
+    echo "${HABANA_GPG_CHECKSUM}  ${_GPG_TEMP}/habana_pubkey" | sha256sum -c - && \
     rpm --import "${_GPG_TEMP}/habana_pubkey" && \
     rm -rf "${_GPG_TEMP}" && \
     dnf makecache && \
@@ -120,6 +128,7 @@ RUN printf "[habanalabs]\\nname=Habana RH9 Linux repo\\nbaseurl=https://${ARTIFA
     mkdir -p /etc/habanalabs && \
     echo "${DETECTED_SYNAPSE_REVISION}" > /etc/habanalabs/synapse_revision && \
     echo "Detected Synapse revision: ${DETECTED_SYNAPSE_REVISION}" && \
+    dnf clean all && \
     chmod +t /var/log/habana_logs && \
     rm -f /etc/yum.repos.d/habanalabs.repo
 
@@ -148,12 +157,13 @@ ARG TORCH_TYPE
 ENV OS_STRING="${OS_STRING}"
 
 # Use installer script from Habana to install Pytorch
-RUN SYNAPSE_REVISION_RUNTIME=$(cat /etc/habanalabs/synapse_revision) && \
+RUN --mount=type=tmpfs,target=/tmp \
+    SYNAPSE_REVISION_RUNTIME=$(cat /etc/habanalabs/synapse_revision) && \
     PT_PACKAGE_NAME="pytorch_modules${PT_PACKAGE_NAME_NON_DEFAULT_PYTHON_SUBSTRING}-v${PT_VERSION}_${SYNAPSE_VERSION}_${SYNAPSE_REVISION_RUNTIME}.tgz" && \
     PT_ARTIFACT_PATH="https://${ARTIFACTORY_URL}/artifactory/${PT_MODULES_REPO_NAME}/${SYNAPSE_VERSION}/${SYNAPSE_REVISION_RUNTIME}/pytorch/${OS_STRING}" && \
     TMP_PATH=$(mktemp --directory) && \
-    wget --no-verbose "${PT_ARTIFACT_PATH}/${PT_PACKAGE_NAME}" && \
-    tar -zxf "${PT_PACKAGE_NAME}" -C "${TMP_PATH}" && \
+    wget --no-verbose -O "${TMP_PATH}/${PT_PACKAGE_NAME}" "${PT_ARTIFACT_PATH}/${PT_PACKAGE_NAME}" && \
+    tar -zxf "${TMP_PATH}/${PT_PACKAGE_NAME}" -C "${TMP_PATH}" && \
     cd "${TMP_PATH}" && \
     export SKIP_INSTALL_DEPENDENCIES=1 && \
     PYTHON_INDEX_URL="--extra-index-url ${PYPI_INDEX_URL}" ./install.sh $SYNAPSE_VERSION $SYNAPSE_REVISION_RUNTIME $TORCH_TYPE && \
@@ -180,14 +190,15 @@ ENV BASE_NAME=${BASE_NAME} \
     VLLM_PATH2=/workspace/vllm-gaudi
 
 # Install additional system dependencies
-RUN dnf install -y gettext jq git --allowerasing && \
+RUN dnf install -y gettext --allowerasing && \
     dnf clean all && \
     ln -sf /usr/bin/python3 /usr/bin/python
 
 WORKDIR /root
 
 # Clone and install vLLM
-RUN set -e && \
+RUN --mount=type=tmpfs,target=/tmp \
+    set -e && \
     mkdir -p $VLLM_PATH2 && \
     git clone https://github.com/vllm-project/vllm-gaudi.git $VLLM_PATH2 && \
     cd $VLLM_PATH2 && \
@@ -204,23 +215,28 @@ RUN set -e && \
     git remote add upstream https://github.com/vllm-project/vllm.git && \
     git fetch upstream --tags && \
     git checkout ${VLLM_PROJECT_COMMIT} && \
-    pip install --no-cache-dir -r <(sed '/^torch/d' requirements/build.txt) && \
+    TMP_REQ_FILE=$(mktemp) && sed '/^torch/d' requirements/build.txt > "$TMP_REQ_FILE" && \
+    pip install --no-cache-dir -r "$TMP_REQ_FILE" && rm -f "$TMP_REQ_FILE" && \
     VLLM_TARGET_DEVICE=empty pip install --no-cache-dir --no-build-isolation . && \
     cd $VLLM_PATH2 && \
     git checkout ${VLLM_GAUDI_COMMIT} && \
     VLLM_TARGET_DEVICE=hpu pip install --no-cache-dir -v . --no-build-isolation && \
     pip check && \
+    pip install --no-cache-dir setuptools>=80.0.0 xgrammar>=0.1.32 ray>=2.55.0 wheel>=0.46.2 jaraco.context>=6.1.0 && \
     rm -rf $VLLM_PATH $VLLM_PATH2
 
 RUN dnf update -y curl-minimal libcurl-minimal glib2 \
     python3 python3-libs python3.12 python3.12-libs python3.12-devel \
     python3-pip python3.12-pip \
-    openssl openssl-libs \
+    openssl openssl-libs sqlite-libs zlib \
     systemd systemd-libs systemd-pam \
     libxml2 openldap p11-kit p11-kit-trust tar \
     git git-core git-core-doc \
     sqlite-libs && \
-    dnf remove -y gdb gdb-gdbserver gdb-headless && \
+    dnf remove -y gdb gdb-gdbserver gdb-headless \
+    wget git git-core git-core-doc gettext jq \
+    zlib-devel libjpeg-turbo-devel libfdt-devel \
+    python3-devel python3.12-devel numactl-devel && \
     dnf clean all && \
     rm -rf /tmp/* /var/tmp/*
 
@@ -250,4 +266,3 @@ COPY LICENSE /licenses/vllm.md
 
 USER 2000
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-
