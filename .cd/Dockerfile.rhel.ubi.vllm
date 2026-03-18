@@ -222,7 +222,7 @@ RUN --mount=type=tmpfs,target=/tmp \
     git checkout ${VLLM_GAUDI_COMMIT} && \
     VLLM_TARGET_DEVICE=hpu pip install --no-cache-dir -v . --no-build-isolation && \
     pip check && \
-    pip install --no-cache-dir "setuptools>=80.0.0" "xgrammar>=0.1.32" "ray>=2.55.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" && \
+    pip install --no-cache-dir "setuptools>=80.0.0" "xgrammar>=0.1.32" "wheel>=0.46.2" "jaraco.context>=6.1.0" && \
     rm -rf $VLLM_PATH $VLLM_PATH2
 
 RUN dnf update -y curl-minimal libcurl-minimal glib2 \
