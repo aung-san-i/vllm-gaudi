@@ -96,7 +96,7 @@ RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 2 && \
 
 # Install base Python packages
 RUN python3 -m pip install --no-cache-dir "setuptools>=80.0.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    "xgrammar>=0.1.32" "ray>=2.55.0" setuptools_scm && \
+    "xgrammar>=0.1.32" setuptools_scm && \
     python3 -m pip install --no-cache-dir --upgrade Jinja2 protobuf urllib3 requests
 
 # Setup Habana repository and install Habana packages
