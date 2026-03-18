@@ -233,7 +233,7 @@ RUN dnf update -y curl-minimal libcurl-minimal glib2 \
     libxml2 openldap p11-kit p11-kit-trust tar \
     git git-core git-core-doc \
     sqlite-libs && \
-    dnf update --allowerasing --skip-broken --nobest && \
+    dnf update -y --allowerasing --skip-broken --nobest && \
     dnf remove -y gdb gdb-gdbserver gdb-headless \
     wget git git-core git-core-doc gettext jq \
     zlib-devel libjpeg-turbo-devel libfdt-devel \
