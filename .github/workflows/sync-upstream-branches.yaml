@@ -1,0 +1,109 @@
+name: "Sync Branches from Upstream"
+
+on:
+  # Allow manual triggering from the GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      upstream_url:
+        description: >
+          URL of the upstream repository to sync branches from.
+        required: false
+        type: string
+        default: "https://github.com/vllm-project/vllm-gaudi.git"
+      dry_run:
+        description: >
+          When enabled, list the branches that would be synced without pushing any changes.
+        required: false
+        type: boolean
+        default: false
+  # Run automatically once per day to stay in sync
+  schedule:
+    - cron: "0 3 * * *"
+
+# Required to push branches to the fork
+permissions:
+  contents: write
+
+jobs:
+  sync-branches:
+    name: "Sync All Upstream Branches to Fork"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Configure Git"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: "Add upstream remote"
+        run: |
+          UPSTREAM_URL="${{ github.event.inputs.upstream_url }}"
+          # Use default URL for scheduled runs (no workflow_dispatch input)
+          UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/vllm-project/vllm-gaudi.git}"
+          echo "Using upstream: $UPSTREAM_URL"
+          git remote add upstream "$UPSTREAM_URL"
+          git remote -v
+
+      - name: "Fetch all upstream and origin branches"
+        run: |
+          git fetch upstream --prune
+          git fetch origin --prune
+
+      - name: "Sync upstream branches to fork"
+        run: |
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+          # Default to false for scheduled runs
+          DRY_RUN="${DRY_RUN:-false}"
+
+          synced=0
+          up_to_date=0
+          failed=0
+
+          while IFS= read -r upstream_ref; do
+            branch="${upstream_ref#refs/remotes/upstream/}"
+            upstream_sha=$(git rev-parse "$upstream_ref")
+            origin_sha=$(git rev-parse "refs/remotes/origin/${branch}" 2>/dev/null || echo "")
+
+            # Skip if already up to date
+            if [[ "$upstream_sha" == "$origin_sha" ]]; then
+              echo "  = Up to date: $branch"
+              up_to_date=$((up_to_date + 1))
+              continue
+            fi
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              if [[ -z "$origin_sha" ]]; then
+                echo "[DRY RUN] Would create: $branch (new branch at $upstream_sha)"
+              else
+                echo "[DRY RUN] Would update: $branch ($origin_sha -> $upstream_sha)"
+              fi
+              synced=$((synced + 1))
+              continue
+            fi
+
+            echo "Syncing branch: $branch"
+            # Use --force since the intent is to mirror the upstream branch exactly.
+            # Protected branches in the fork will reject the push gracefully.
+            push_output=$(git push origin "${upstream_ref}:refs/heads/${branch}" --force 2>&1)
+            push_exit=$?
+            echo "$push_output"
+            if [[ $push_exit -eq 0 ]]; then
+              echo "  ✓ Synced: $branch"
+              synced=$((synced + 1))
+            else
+              echo "  ✗ Failed to sync: $branch (exit code: $push_exit)"
+              failed=$((failed + 1))
+            fi
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/upstream/ | grep -v 'refs/remotes/upstream/HEAD')
+
+          echo ""
+          echo "=== Sync Summary ==="
+          echo "  Synced:      $synced"
+          echo "  Up to date:  $up_to_date"
+          echo "  Failed:      $failed"
+
